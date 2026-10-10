@@ -182,20 +182,26 @@
         if ((subscriptions || []).some(item => item.id_negocio !== profile.id_negocio))
           throw new Error('Se detectó una suscripción de otro negocio. Revisar RLS.');
 
-        // Control adicional: consultar expresamente un negocio ajeno conocido.
-        // Una respuesta vacía es la esperada; no se muestran datos ajenos.
-        const otherId = profile.id_negocio === 'NEG-000002' ? 'NEG-000001' : 'NEG-000002';
-        const { data: otherBusiness, error: isolationError } = await client
-          .from('negocios').select('id_negocio').eq('id_negocio', otherId);
+        // Comprobación cruzada entre las dos cuentas reales de prueba.
+        // También se comprueba NEG-000002, que permanece sin activar.
+        const otherIds = ['NEG-000001', 'NEG-000002', 'NEG-000003']
+          .filter(id => id !== profile.id_negocio);
+        const { data: otherBusinesses, error: isolationError } = await client
+          .from('negocios')
+          .select('id_negocio')
+          .in('id_negocio', otherIds);
         if (isolationError) throw new Error('Aislamiento: ' + isolationError.message);
-        if (otherBusiness?.length) throw new Error('La consulta pudo leer un negocio ajeno. Revisar RLS antes de continuar.');
+        if (otherBusinesses?.length) {
+          throw new Error('RLS permitió leer un negocio ajeno: ' +
+            otherBusinesses.map(item => item.id_negocio).join(', ') + '. No continuar hasta corregirlo.');
+        }
 
         $('diagnosticUser').textContent = profile.nombre + ' (' + profile.id_usuario + ') · ' + profile.rol;
         $('diagnosticBusiness').textContent = businesses[0].nombre + ' (' + profile.id_negocio + ')';
         $('diagnosticSubscription').textContent = subscriptions.length
           ? subscriptions.map(item => item.estado + ' · ' + item.id_sistema + (item.proximo_vencimiento ? ' · vence ' + item.proximo_vencimiento : '')).join(' | ')
           : 'No hay suscripciones visibles';
-        $('diagnosticIsolation').textContent = 'Correcta: no se pudo leer el negocio ' + otherId;
+        $('diagnosticIsolation').textContent = 'Correcta: acceso denegado a ' + otherIds.join(' y ');
         details.hidden = false;
         status.textContent = 'Consultas correctas: RLS permite ver solo el negocio vinculado.';
         status.className = 'status ok';
