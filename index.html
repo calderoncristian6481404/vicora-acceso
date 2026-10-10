@@ -83,7 +83,8 @@
           </div>
           <button class="btn secondary" id="diagnosticButton" type="button">Volver a comprobar</button>
         </div>
-        <p class="subtitle">Tu cuenta de Supabase está autenticada. La conexión con VICORA Comercial se habilitará en una próxima etapa.</p>
+        <p class="subtitle">VICORA Comercial está en preparación. El acceso único se habilitará después de completar la conexión segura.</p>
+        <button class="btn" id="commercialButton" type="button" hidden disabled>Ingresar a VICORA Comercial (prueba)</button>
         <button class="btn secondary" id="logoutButton" type="button">Cerrar sesión</button>
       </div>
     </section>
@@ -157,6 +158,8 @@
       status.className = 'status';
       details.hidden = true;
       button.disabled = true;
+      $('commercialButton').hidden = true;
+      $('commercialButton').disabled = true;
       try {
         const { data: userData, error: authError } = await client.auth.getUser();
         if (authError || !userData?.user) throw new Error('No hay una sesión válida. Volvé a iniciar sesión.');
@@ -205,6 +208,8 @@
         details.hidden = false;
         status.textContent = 'Consultas correctas: RLS permite ver solo el negocio vinculado.';
         status.className = 'status ok';
+        $('commercialButton').hidden = false;
+        $('commercialButton').disabled = false;
       } catch (error) {
         status.textContent = 'No se pudo completar la prueba: ' + String(error?.message || error);
         status.className = 'status fail';
@@ -312,6 +317,10 @@
       finally { setBusy(false); }
     });
     $('diagnosticButton').addEventListener('click', checkMyBusiness);
+    $('commercialButton').addEventListener('click', () => {
+      // Navegación de prueba en la misma pestaña. No transmite credenciales.
+      window.location.assign('https://calderoncristian6481404.github.io/vicora-comercial/');
+    });
     $('logoutButton').addEventListener('click', async () => {
       if (busy || !client) return;
       setBusy(true);
