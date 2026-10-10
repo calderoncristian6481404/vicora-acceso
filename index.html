@@ -27,6 +27,13 @@
     .message { margin-bottom: 18px; padding: 12px; border-radius: 9px; background: #eff6ff; color: #1d4ed8; font-size: 13px; line-height: 1.5; }
     .message.error { background: #fef2f2; color: #b91c1c; }
     .message.success { background: #ecfdf5; color: #047857; }
+    .diagnostic { margin: 18px 0; border: 1px solid #dbeafe; border-radius: 12px; padding: 15px; background: #f8fafc; }
+    .diagnostic h3 { font-size: 16px; margin-bottom: 12px; color: #1e3a8a; }
+    .diagnostic p { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; margin: 6px 0; }
+    .diagnostic strong { color: #334155; }
+    .diagnostic .status { color: #475569; }
+    .diagnostic .status.ok { color: #047857; }
+    .diagnostic .status.fail { color: #b91c1c; }
     .footer { text-align: center; color: #94a3b8; font-size: 12px; margin-top: 25px; }
     [hidden] { display: none !important; }
     @media (max-width: 480px) { .card { padding: 25px 20px; } .brand h1 { font-size: 30px; } }
@@ -65,6 +72,17 @@
 
       <div id="sessionPanel" hidden>
         <div class="message success" id="sessionInfo"></div>
+        <div class="diagnostic" aria-live="polite">
+          <h3>Mi negocio · Prueba de seguridad</h3>
+          <p id="diagnosticStatus" class="status">Preparando consulta...</p>
+          <div id="diagnosticDetails" hidden>
+            <p><strong>Usuario:</strong> <span id="diagnosticUser"></span></p>
+            <p><strong>Negocio:</strong> <span id="diagnosticBusiness"></span></p>
+            <p><strong>Suscripción:</strong> <span id="diagnosticSubscription"></span></p>
+            <p><strong>Prueba de aislamiento:</strong> <span id="diagnosticIsolation"></span></p>
+          </div>
+          <button class="btn secondary" id="diagnosticButton" type="button">Volver a comprobar</button>
+        </div>
         <p class="subtitle">Tu cuenta de Supabase está autenticada. La conexión con VICORA Comercial se habilitará en una próxima etapa.</p>
         <button class="btn secondary" id="logoutButton" type="button">Cerrar sesión</button>
       </div>
@@ -126,6 +144,67 @@
       view('session');
       $('sessionInfo').textContent = 'Sesión activa: ' + (user.email || 'usuario');
       message('Autenticación realizada correctamente.', 'success');
+      await checkMyBusiness();
+    }
+
+    // Consultas de solo lectura con la sesión real de Supabase Auth.
+    // El navegador utiliza exclusivamente la clave pública y las políticas RLS.
+    async function checkMyBusiness() {
+      const status = $('diagnosticStatus');
+      const details = $('diagnosticDetails');
+      const button = $('diagnosticButton');
+      status.textContent = 'Consultando PostgreSQL con tu sesión...';
+      status.className = 'status';
+      details.hidden = true;
+      button.disabled = true;
+      try {
+        const { data: userData, error: authError } = await client.auth.getUser();
+        if (authError || !userData?.user) throw new Error('No hay una sesión válida. Volvé a iniciar sesión.');
+
+        const { data: profiles, error: profileError } = await client
+          .from('usuarios')
+          .select('id_usuario,id_negocio,nombre,rol,estado,auth_user_id');
+        if (profileError) throw new Error('Usuarios: ' + profileError.message);
+        if (!profiles || profiles.length !== 1 || profiles[0].auth_user_id !== userData.user.id)
+          throw new Error('La consulta de usuarios no devolvió exactamente el perfil de la sesión. Revisar RLS.');
+        const profile = profiles[0];
+        if (profile.estado !== 'ACTIVO') throw new Error('El usuario no está activo.');
+
+        const { data: businesses, error: businessError } = await client
+          .from('negocios').select('id_negocio,nombre,estado');
+        if (businessError) throw new Error('Negocios: ' + businessError.message);
+        if (!businesses || businesses.length !== 1 || businesses[0].id_negocio !== profile.id_negocio)
+          throw new Error('La consulta de negocios no devolvió exclusivamente el negocio autorizado. Revisar RLS.');
+
+        const { data: subscriptions, error: subscriptionError } = await client
+          .from('suscripciones').select('id_suscripcion,id_negocio,id_sistema,estado,proximo_vencimiento');
+        if (subscriptionError) throw new Error('Suscripciones: ' + subscriptionError.message);
+        if ((subscriptions || []).some(item => item.id_negocio !== profile.id_negocio))
+          throw new Error('Se detectó una suscripción de otro negocio. Revisar RLS.');
+
+        // Control adicional: consultar expresamente un negocio ajeno conocido.
+        // Una respuesta vacía es la esperada; no se muestran datos ajenos.
+        const otherId = profile.id_negocio === 'NEG-000002' ? 'NEG-000001' : 'NEG-000002';
+        const { data: otherBusiness, error: isolationError } = await client
+          .from('negocios').select('id_negocio').eq('id_negocio', otherId);
+        if (isolationError) throw new Error('Aislamiento: ' + isolationError.message);
+        if (otherBusiness?.length) throw new Error('La consulta pudo leer un negocio ajeno. Revisar RLS antes de continuar.');
+
+        $('diagnosticUser').textContent = profile.nombre + ' (' + profile.id_usuario + ') · ' + profile.rol;
+        $('diagnosticBusiness').textContent = businesses[0].nombre + ' (' + profile.id_negocio + ')';
+        $('diagnosticSubscription').textContent = subscriptions.length
+          ? subscriptions.map(item => item.estado + ' · ' + item.id_sistema + (item.proximo_vencimiento ? ' · vence ' + item.proximo_vencimiento : '')).join(' | ')
+          : 'No hay suscripciones visibles';
+        $('diagnosticIsolation').textContent = 'Correcta: no se pudo leer el negocio ' + otherId;
+        details.hidden = false;
+        status.textContent = 'Consultas correctas: RLS permite ver solo el negocio vinculado.';
+        status.className = 'status ok';
+      } catch (error) {
+        status.textContent = 'No se pudo completar la prueba: ' + String(error?.message || error);
+        status.className = 'status fail';
+      } finally {
+        button.disabled = false;
+      }
     }
 
     async function processAuthLink() {
@@ -226,6 +305,7 @@
       } catch (error) { message(authError(error), 'error'); }
       finally { setBusy(false); }
     });
+    $('diagnosticButton').addEventListener('click', checkMyBusiness);
     $('logoutButton').addEventListener('click', async () => {
       if (busy || !client) return;
       setBusy(true);
