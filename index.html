@@ -111,6 +111,7 @@
     const SUPABASE_URL = 'https://nxdimgzcsjnjjdfdpatp.supabase.co';
     const SUPABASE_PUBLIC_KEY = 'sb_publishable_4LbyNm4vT3qBh6v6OIjB4Q_IDb4OpRB';
     const SITE_URL = 'https://calderoncristian6481404.github.io/vicora-acceso/';
+    const RECOVERY_URL = SITE_URL + '?vicora_action=recovery';
     const $ = (id) => document.getElementById(id);
     const forms = ['loginForm', 'signupForm', 'recoveryForm', 'passwordForm', 'sessionPanel'];
     let client = null;
@@ -263,11 +264,12 @@
       // Enlaces de invitación o recuperación que traen token_hash.
       const tokenHash = query.get('token_hash');
       const type = query.get('type');
+      const isRecovery = query.get('vicora_action') === 'recovery' || type === 'recovery' || hash.get('type') === 'recovery';
       if (tokenHash && ['invite', 'recovery', 'signup', 'email'].includes(type)) {
         const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type });
         cleanUrl();
         if (error) { view('login'); message(authError(error), 'error'); }
-        else if (type === 'invite' || type === 'recovery') { view('password'); message('Enlace verificado. Ahora podés crear tu contraseña.'); }
+        else if (type === 'invite' || isRecovery) { view('password'); message('Enlace verificado. Ahora podés crear tu contraseña.'); }
         else { const { data } = await client.auth.getUser(); if (data.user) await showSession(data.user); else view('login'); }
         return true;
       }
@@ -294,7 +296,7 @@
         const { error } = await client.auth.setSession({ access_token: hash.get('access_token'), refresh_token: hash.get('refresh_token') });
         cleanUrl();
         if (error) { view('login'); message(authError(error), 'error'); }
-        else if (linkType === 'invite' || linkType === 'recovery') { view('password'); message('Enlace verificado. Establecé tu contraseña.'); }
+        else if (linkType === 'invite' || isRecovery) { view('password'); message('Enlace verificado. Establecé tu contraseña.'); }
         else { const { data } = await client.auth.getUser(); if (data.user) await showSession(data.user); else view('login'); }
         return true;
       }
@@ -308,6 +310,12 @@
       });
       try {
         if (await processAuthLink()) return;
+        if (new URLSearchParams(location.search).get('vicora_action') === 'recovery') {
+          cleanUrl();
+          view('login');
+          message('El enlace de recuperación no contiene un código válido. Solicitá uno nuevo.', 'error');
+          return;
+        }
         const { data: { session }, error } = await client.auth.getSession();
         if (error) throw error;
         if (session) {
@@ -364,7 +372,7 @@
       event.preventDefault(); if (busy || !client) return;
       setBusy(true); message('Enviando solicitud...');
       try {
-        const { error } = await client.auth.resetPasswordForEmail($('recoveryEmail').value.trim(), { redirectTo: SITE_URL });
+        const { error } = await client.auth.resetPasswordForEmail($('recoveryEmail').value.trim(), { redirectTo: RECOVERY_URL });
         if (error) throw error;
         message('Si el correo está registrado, recibirás un enlace para recuperar tu contraseña. Revisá también spam.', 'success');
       } catch (error) { message(authError(error), 'error'); }
@@ -382,8 +390,11 @@
         const { error } = await client.auth.updateUser({ password });
         if (error) throw error;
         $('newPassword').value = ''; $('confirmPassword').value = '';
-        await showSession(user);
-        message('Contraseña guardada correctamente. Tu cuenta ya está activada.', 'success');
+        const { error: signOutError } = await client.auth.signOut();
+        if (signOutError) throw signOutError;
+        cleanUrl();
+        view('login');
+        message('Contraseña actualizada correctamente. Ahora ingresá con tu nueva contraseña.', 'success');
       } catch (error) { message(authError(error), 'error'); }
       finally { setBusy(false); }
     });
