@@ -177,12 +177,20 @@
       if (error) throw new Error('No se pudo activar el negocio: ' + error.message);
     }
 
+    // El diagnóstico sigue disponible si hay un problema, pero el ingreso normal
+    // verifica RLS silenciosamente y abre directamente VICORA Comercial.
     async function showSession(user) {
       await finalizePublicSignup(user);
+      message('Verificando acceso seguro al negocio...');
+      const authorized = await checkMyBusiness();
+      if (authorized) {
+        window.location.replace('https://calderoncristian6481404.github.io/VICORA-Comercial/');
+        return;
+      }
+      // Ante un error de autorización no redirigir: mostrar diagnóstico.
       view('session');
       $('sessionInfo').textContent = 'Sesión activa: ' + (user.email || 'usuario');
-      message('Autenticación realizada correctamente.', 'success');
-      await checkMyBusiness();
+      message('No se pudo verificar el acceso. Revisá el detalle de seguridad.', 'error');
     }
 
     // Consultas de solo lectura con la sesión real de Supabase Auth.
@@ -247,9 +255,11 @@
         status.className = 'status ok';
         $('commercialButton').hidden = false;
         $('commercialButton').disabled = false;
+        return true;
       } catch (error) {
         status.textContent = 'No se pudo completar la prueba: ' + String(error?.message || error);
         status.className = 'status fail';
+        return false;
       } finally {
         button.disabled = false;
       }
