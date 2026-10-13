@@ -281,7 +281,11 @@
         if (error) { view('login'); message(authError(error), 'error'); }
         else {
           const { data } = await client.auth.getUser();
-          if (data?.user?.user_metadata?.vicora_registro_publico === true) {
+          if (isRecovery) {
+            // La recuperación tiene prioridad sobre el registro público y la sesión previa.
+            view('password');
+            message('Enlace de recuperación verificado. Ingresá tu nueva contraseña.');
+          } else if (data?.user?.user_metadata?.vicora_registro_publico === true) {
             await showSession(data.user);
           } else {
             view('password'); message('Enlace verificado. Establecé tu contraseña.');
